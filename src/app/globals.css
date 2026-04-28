@@ -24,3 +24,42 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+/* Always-visible, prominent scrollbar that reserves its own space
+   so it doesn't overlap content. Used on the calendar picker. */
+.always-scroll {
+  scrollbar-gutter: stable;
+  scrollbar-width: auto; /* Firefox: thicker than 'thin' */
+  scrollbar-color: #94a3b8 transparent; /* Firefox: thumb / track */
+}
+.always-scroll::-webkit-scrollbar {
+  width: 12px;
+  height: 12px;
+}
+.always-scroll::-webkit-scrollbar-track {
+  background: rgba(0, 0, 0, 0.05);
+  border-radius: 6px;
+}
+.always-scroll::-webkit-scrollbar-thumb {
+  background-color: #94a3b8;
+  border-radius: 6px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+.always-scroll::-webkit-scrollbar-thumb:hover {
+  background-color: #64748b;
+}
+@media (prefers-color-scheme: dark) {
+  .always-scroll {
+    scrollbar-color: #475569 transparent;
+  }
+  .always-scroll::-webkit-scrollbar-track {
+    background: rgba(255, 255, 255, 0.06);
+  }
+  .always-scroll::-webkit-scrollbar-thumb {
+    background-color: #475569;
+  }
+  .always-scroll::-webkit-scrollbar-thumb:hover {
+    background-color: #64748b;
+  }
+}

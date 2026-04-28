@@ -1,0 +1,25 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(source ~/.nvm/nvm.sh && *)",
+      "Bash(npm run build*)",
+      "Bash(npm run dev*)",
+      "Bash(npm install*)",
+      "Bash(npm ls*)"
+    ]
+  },
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cd \"/Users/rogerarnemann/Documents/Claude/Projects/Project - Code - Calendar/calendar-app\" && source ~/.nvm/nvm.sh && SESSION_SECRET=$(node -e \"console.log('x'.repeat(40))\") GOOGLE_CLIENT_ID=stub GOOGLE_CLIENT_SECRET=stub GOOGLE_REDIRECT_URI=http://localhost:3000/api/auth/callback npm run build 2>&1 | tail -5",
+            "timeout": 120,
+            "statusMessage": "Verifying build..."
+          }
+        ]
+      }
+    ]
+  }
+}
