@@ -1,11 +1,18 @@
 {
   "permissions": {
+    "defaultMode": "acceptEdits",
     "allow": [
       "Bash(source ~/.nvm/nvm.sh && *)",
       "Bash(npm run build*)",
       "Bash(npm run dev*)",
       "Bash(npm install*)",
-      "Bash(npm ls*)"
+      "Bash(npm ls*)",
+      "Bash(git status*)",
+      "Bash(git log*)",
+      "Bash(git add*)",
+      "Bash(git commit*)",
+      "Bash(git tag*)",
+      "Bash(git diff*)"
     ]
   },
   "hooks": {

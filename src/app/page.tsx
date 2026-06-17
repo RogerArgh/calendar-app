@@ -21,6 +21,16 @@ type DayResult = {
   workWindow: { start: string; end: string };
   freeSlots: Slot[];
 };
+type EventBlock = {
+  calendarId: string;
+  summary: string | null;
+  start: string;
+  end: string;
+  isAllDay: boolean;
+  isTransparent: boolean;
+  backgroundColor: string;
+  foregroundColor: string;
+};
 type CalDebug = {
   calendarId: string;
   fetchKind: "events" | "freeBusy";
@@ -34,7 +44,17 @@ type AvailDebug = {
   totalBusyIntervals: number;
 };
 
-const DOW_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+// Workday-selector buttons, ordered Mon → Sun for display.
+// `dow` is the JS Date.getDay() number (0=Sun..6=Sat) — what `workDays` stores.
+const WORKDAY_BUTTONS: { label: string; dow: number }[] = [
+  { label: "Mon", dow: 1 },
+  { label: "Tue", dow: 2 },
+  { label: "Wed", dow: 3 },
+  { label: "Thu", dow: 4 },
+  { label: "Fri", dow: 5 },
+  { label: "Sat", dow: 6 },
+  { label: "Sun", dow: 0 },
+];
 
 function todayLocalISO(): string {
   const d = new Date();
@@ -100,8 +120,11 @@ export default function Home() {
   const [excludeTransparent, setExcludeTransparent] = useState(true);
   const [snapToHalfHour, setSnapToHalfHour] = useState(true);
   const [viewMode, setViewMode] = useState<"text" | "grid">("text");
+  const [showEvents, setShowEvents] = useState(true);
+  const [showFreeSlots, setShowFreeSlots] = useState(true);
 
   const [results, setResults] = useState<DayResult[] | null>(null);
+  const [eventBlocks, setEventBlocks] = useState<EventBlock[]>([]);
   const [availDebug, setAvailDebug] = useState<AvailDebug | null>(null);
   const [loadingAvail, setLoadingAvail] = useState(false);
   const [availError, setAvailError] = useState<string | null>(null);
@@ -140,6 +163,8 @@ export default function Home() {
           setSnapToHalfHour(s.snapToHalfHour);
         if (s.viewMode === "text" || s.viewMode === "grid")
           setViewMode(s.viewMode);
+        if (typeof s.showEvents === "boolean") setShowEvents(s.showEvents);
+        if (typeof s.showFreeSlots === "boolean") setShowFreeSlots(s.showFreeSlots);
       } else {
         // Migration: an earlier version saved hidden IDs under their own key.
         // Pull them in once if the consolidated key doesn't exist yet.
@@ -176,6 +201,8 @@ export default function Home() {
           excludeTransparent,
           snapToHalfHour,
           viewMode,
+          showEvents,
+          showFreeSlots,
         }),
       );
     } catch {
@@ -194,6 +221,8 @@ export default function Home() {
     excludeTransparent,
     snapToHalfHour,
     viewMode,
+    showEvents,
+    showFreeSlots,
   ]);
 
   const loadCalendars = useCallback(async () => {
@@ -276,6 +305,7 @@ export default function Home() {
     setAvailDebug(null);
     setLoadingAvail(true);
     setResults(null);
+    setEventBlocks([]);
     try {
       const [sh, sm] = workStart.split(":").map(Number);
       const [eh, em] = workEnd.split(":").map(Number);
@@ -287,6 +317,13 @@ export default function Home() {
       const [ey, emo, ed] = endDate.split("-").map(Number);
       const timeMin = new Date(sy, smo - 1, sd, 0, 0, 0);
       const timeMax = new Date(ey, emo - 1, ed, 23, 59, 59);
+
+      // Build a calendarId → { bg, fg } map from the loaded calendar list so
+      // the server can resolve per-event color overrides against each calendar's
+      // base color without needing an extra calendarList call.
+      const calendarColors = Object.fromEntries(
+        calendars.map((c) => [c.id, { bg: c.backgroundColor, fg: c.foregroundColor }]),
+      );
 
       const r = await fetch("/api/availability", {
         method: "POST",
@@ -302,6 +339,7 @@ export default function Home() {
           minSlotMinutes,
           excludeTransparent,
           snapToHalfHour,
+          calendarColors,
         }),
       });
       if (!r.ok) {
@@ -311,6 +349,7 @@ export default function Home() {
       }
       const d = await r.json();
       setResults(d.days || []);
+      setEventBlocks(d.eventBlocks || []);
       if (d.debug) setAvailDebug(d.debug);
     } catch (err) {
       setAvailError(err instanceof Error ? err.message : "Unknown error");
@@ -351,16 +390,19 @@ export default function Home() {
   return (
     <main className="min-h-screen bg-zinc-50 dark:bg-zinc-950 p-4 sm:p-8">
       <div className="max-w-6xl mx-auto space-y-6">
-        <header className="flex items-center justify-between">
+        <header className="flex items-center justify-between gap-4">
           <h1 className="text-2xl font-semibold">Calendar Availability</h1>
-          <form action="/api/auth/logout" method="POST">
-            <button
-              type="submit"
-              className="text-sm text-zinc-600 dark:text-zinc-400 hover:underline"
-            >
-              Sign out
-            </button>
-          </form>
+          <div className="flex items-center gap-4">
+            <Clock tz={tz} />
+            <form action="/api/auth/logout" method="POST">
+              <button
+                type="submit"
+                className="text-sm text-zinc-600 dark:text-zinc-400 hover:underline"
+              >
+                Sign out
+              </button>
+            </form>
+          </div>
         </header>
 
         <div className="grid grid-cols-1 lg:grid-cols-[320px_1fr] gap-6">
@@ -507,13 +549,13 @@ export default function Home() {
                   Days
                 </div>
                 <div className="flex gap-1">
-                  {DOW_LABELS.map((label, idx) => (
+                  {WORKDAY_BUTTONS.map(({ label, dow }) => (
                     <button
-                      key={idx}
+                      key={dow}
                       type="button"
-                      onClick={() => toggleWorkDay(idx)}
+                      onClick={() => toggleWorkDay(dow)}
                       className={`flex-1 text-xs py-1.5 rounded border transition-colors ${
-                        workDays.has(idx)
+                        workDays.has(dow)
                           ? "bg-blue-600 border-blue-600 text-white"
                           : "border-zinc-300 dark:border-zinc-700 text-zinc-600 dark:text-zinc-400"
                       }`}
@@ -568,21 +610,43 @@ export default function Home() {
 
           {/* Right panel: results */}
           <section className="bg-white dark:bg-zinc-900 rounded-xl shadow-sm p-4 min-h-96">
-            <div className="flex items-center justify-between mb-4">
+            <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
               <h2 className="font-medium">Available times</h2>
-              <div className="inline-flex rounded-lg border border-zinc-300 dark:border-zinc-700 overflow-hidden text-sm">
-                <button
-                  onClick={() => setViewMode("text")}
-                  className={`px-3 py-1 ${viewMode === "text" ? "bg-zinc-200 dark:bg-zinc-800" : ""}`}
-                >
-                  Text
-                </button>
-                <button
-                  onClick={() => setViewMode("grid")}
-                  className={`px-3 py-1 border-l border-zinc-300 dark:border-zinc-700 ${viewMode === "grid" ? "bg-zinc-200 dark:bg-zinc-800" : ""}`}
-                >
-                  Grid
-                </button>
+              <div className="flex items-center gap-3 flex-wrap">
+                {viewMode === "grid" && (
+                  <>
+                    <label className="flex items-center gap-1.5 text-xs cursor-pointer select-none">
+                      <input
+                        type="checkbox"
+                        checked={showEvents}
+                        onChange={(e) => setShowEvents(e.target.checked)}
+                      />
+                      <span className="text-zinc-600 dark:text-zinc-400">Events</span>
+                    </label>
+                    <label className="flex items-center gap-1.5 text-xs cursor-pointer select-none">
+                      <input
+                        type="checkbox"
+                        checked={showFreeSlots}
+                        onChange={(e) => setShowFreeSlots(e.target.checked)}
+                      />
+                      <span className="text-green-700 dark:text-green-400 font-medium">Free slots</span>
+                    </label>
+                  </>
+                )}
+                <div className="inline-flex rounded-lg border border-zinc-300 dark:border-zinc-700 overflow-hidden text-sm">
+                  <button
+                    onClick={() => setViewMode("text")}
+                    className={`px-3 py-1 ${viewMode === "text" ? "bg-zinc-200 dark:bg-zinc-800" : ""}`}
+                  >
+                    Text
+                  </button>
+                  <button
+                    onClick={() => setViewMode("grid")}
+                    className={`px-3 py-1 border-l border-zinc-300 dark:border-zinc-700 ${viewMode === "grid" ? "bg-zinc-200 dark:bg-zinc-800" : ""}`}
+                  >
+                    Grid
+                  </button>
+                </div>
               </div>
             </div>
 
@@ -607,6 +671,10 @@ export default function Home() {
                 tz={tz}
                 workStart={workStart}
                 workEnd={workEnd}
+                eventBlocks={eventBlocks}
+                calendars={calendars}
+                showEvents={showEvents}
+                showFreeSlots={showFreeSlots}
               />
             )}
             {availDebug && availDebug.totalBusyIntervals === 0 && (
@@ -641,6 +709,87 @@ export default function Home() {
         </div>
       </div>
     </main>
+  );
+}
+
+// Live clock + time-zone readout. Shows the time the *system* (browser) thinks
+// it is, in the same IANA zone the availability calc uses, so a traveler can
+// confirm their machine's clock/zone before reading any results. The time is
+// only rendered after mount — server and first client render both show the
+// placeholder, avoiding a hydration mismatch on the ticking value.
+function Clock({ tz }: { tz: string }) {
+  const [now, setNow] = useState<Date | null>(null);
+
+  useEffect(() => {
+    setNow(new Date());
+    const id = setInterval(() => setNow(new Date()), 1000);
+    return () => clearInterval(id);
+  }, []);
+
+  // Short zone abbreviation for the current offset, e.g. "GMT+2" / "PDT".
+  const zoneAbbr = useMemo(() => {
+    try {
+      const parts = new Intl.DateTimeFormat("en-US", {
+        timeZone: tz,
+        timeZoneName: "short",
+      }).formatToParts(now ?? new Date());
+      return parts.find((p) => p.type === "timeZoneName")?.value ?? "";
+    } catch {
+      return "";
+    }
+  }, [tz, now]);
+
+  const time = now
+    ? now.toLocaleTimeString("en-US", {
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+        hour12: true,
+        timeZone: tz,
+      })
+    : "--:--:-- --";
+
+  const date = now
+    ? now.toLocaleDateString(undefined, {
+        weekday: "short",
+        month: "short",
+        day: "numeric",
+        timeZone: tz,
+      })
+    : "";
+
+  return (
+    <div
+      className="flex items-center gap-2 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-3 py-1.5 shadow-sm"
+      title="The time and zone your system is currently set to"
+    >
+      <svg
+        className="w-4 h-4 text-zinc-400 shrink-0"
+        fill="none"
+        viewBox="0 0 24 24"
+        stroke="currentColor"
+        strokeWidth={1.8}
+      >
+        <circle cx="12" cy="12" r="9" />
+        <path strokeLinecap="round" strokeLinejoin="round" d="M12 7v5l3 2" />
+      </svg>
+      <div className="leading-tight">
+        <div
+          className="font-mono text-base font-semibold tabular-nums"
+          suppressHydrationWarning
+        >
+          {time}
+        </div>
+        <div
+          className="text-[11px] text-zinc-500 dark:text-zinc-400"
+          suppressHydrationWarning
+        >
+          {date && `${date} · `}
+          {tz}
+          {zoneAbbr && ` (${zoneAbbr})`}
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -713,6 +862,7 @@ function DateField({
             }}
             showOutsideDays
             captionLayout="dropdown"
+            weekStartsOn={1}
           />
         </div>
       )}
@@ -827,109 +977,319 @@ function TextView({ days, tz }: { days: DayResult[]; tz: string }) {
   );
 }
 
+// Return the ISO date string for the Monday of the week containing `iso`.
+function mondayOfWeek(iso: string): string {
+  const [y, m, d] = iso.split("-").map(Number);
+  const dt = new Date(y, m - 1, d);
+  const dow = dt.getDay(); // 0=Sun..6=Sat
+  const delta = dow === 0 ? -6 : 1 - dow; // days back to Monday
+  dt.setDate(dt.getDate() + delta);
+  return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, "0")}-${String(dt.getDate()).padStart(2, "0")}`;
+}
+
+// Short date label: "Apr 28"
+function shortDate(iso: string, tz: string): string {
+  const [y, m, d] = iso.split("-").map(Number);
+  return new Date(Date.UTC(y, m - 1, d, 12)).toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    timeZone: tz,
+  });
+}
+
+// Format a 0-23 hour integer as a short label: 12a, 1a…11a, 12p, 1p…11p
+function formatHourLabel(h: number): string {
+  if (h === 0) return "12a";
+  if (h === 12) return "12p";
+  return h < 12 ? `${h}a` : `${h - 12}p`;
+}
+
+const HOUR_PX = 40; // pixels per hour — keeps 13-hour default window at 520 px
+
 function GridView({
   days,
   tz,
   workStart,
   workEnd,
+  eventBlocks,
+  calendars,
+  showEvents,
+  showFreeSlots,
 }: {
   days: DayResult[];
   tz: string;
   workStart: string;
   workEnd: string;
+  eventBlocks: EventBlock[];
+  calendars: Calendar[];
+  showEvents: boolean;
+  showFreeSlots: boolean;
 }) {
-  if (days.length === 0) {
-    return (
-      <p className="text-sm text-zinc-500">
-        No days matched the working-day filter.
-      </p>
-    );
-  }
+  const [weekIdx, setWeekIdx] = useState(0);
+  const scrollRef = useRef<HTMLDivElement>(null);
+
+  // Group days into calendar weeks (keyed by their Monday).
+  const weekGroups = useMemo(() => {
+    const map = new Map<string, DayResult[]>();
+    for (const d of days) {
+      const key = mondayOfWeek(d.date);
+      const arr = map.get(key) ?? [];
+      arr.push(d);
+      map.set(key, arr);
+    }
+    return [...map.values()];
+  }, [days]);
+
+  // Reset to first week whenever a new result set arrives.
+  useEffect(() => { setWeekIdx(0); }, [days]);
+
   const [sh, sm] = workStart.split(":").map(Number);
   const [eh, em] = workEnd.split(":").map(Number);
-  const startMin = sh * 60 + (sm || 0);
-  const endMin = eh * 60 + (em || 0);
-  const totalMin = Math.max(1, endMin - startMin);
-  const hourLines: number[] = [];
-  for (let h = Math.ceil(startMin / 60); h * 60 < endMin; h++) {
-    hourLines.push(h);
+  const wStartHour = sh + (sm || 0) / 60;
+  const wEndHour   = eh + (em || 0) / 60;
+
+  const FULL_H   = 24 * HOUR_PX;                                  // 960 px — full day
+  const visibleH = Math.round((wEndHour - wStartHour) * HOUR_PX); // default viewport height
+
+  // Auto-scroll so the work-window start sits at the top of the viewport on
+  // mount and whenever the user pages to a different week.
+  useEffect(() => {
+    if (scrollRef.current) {
+      scrollRef.current.scrollTop = wStartHour * HOUR_PX;
+    }
+  }, [weekIdx, wStartHour, days]);
+
+  if (days.length === 0) {
+    return <p className="text-sm text-zinc-500">No days matched the working-day filter.</p>;
   }
 
-  function slotPct(iso: string, day: DayResult) {
-    const t = new Date(iso);
-    const ref = new Date(day.workWindow.start);
-    const minFromStart = (t.getTime() - ref.getTime()) / 60000;
-    return Math.max(0, Math.min(totalMin, minFromStart)) / totalMin;
+  const multiWeek = weekGroups.length > 1;
+  const visibleDays = multiWeek ? (weekGroups[weekIdx] ?? []) : days;
+  const nCols = visibleDays.length;
+
+  // Build a calMap only for the legend (calendar name + swatch).
+  const calMap = new Map(
+    calendars.map((c) => [c.id, { bg: c.backgroundColor, fg: c.foregroundColor, summary: c.summary }]),
+  );
+
+  // Convert an ISO timestamp to pixels from midnight (in the user's timezone).
+  // midnightMs is the UTC epoch ms corresponding to 00:00 local on that day.
+  function toTopPx(iso: string, midnightMs: number): number {
+    return Math.max(0, (new Date(iso).getTime() - midnightMs) / 3_600_000 * HOUR_PX);
   }
+
+  const rangeLabel = visibleDays.length > 0
+    ? `${shortDate(visibleDays[0].date, tz)} – ${shortDate(visibleDays[visibleDays.length - 1].date, tz)}`
+    : "";
 
   return (
-    <div className="overflow-x-auto">
-      <div
-        className="grid gap-2 min-w-max"
-        style={{
-          gridTemplateColumns: `60px repeat(${days.length}, minmax(90px, 1fr))`,
-        }}
-      >
-        <div />
-        {days.map((d) => (
-          <div
-            key={d.date}
-            className="text-xs text-center font-medium text-zinc-600 dark:text-zinc-400"
-          >
-            {formatDate(d.date, tz)}
-          </div>
-        ))}
+    <div className="flex flex-col gap-2">
 
-        <div className="relative h-[480px]">
-          {hourLines.map((h) => {
-            const pct = (h * 60 - startMin) / totalMin;
-            return (
+      {/* ── week navigation (only when range spans >1 week) ── */}
+      {multiWeek && (
+        <div className="flex items-center justify-between gap-2">
+          <button
+            onClick={() => setWeekIdx((i) => Math.max(0, i - 1))}
+            disabled={weekIdx === 0}
+            className="flex items-center gap-1 px-3 py-1 rounded-lg border border-zinc-300 dark:border-zinc-600 text-sm disabled:opacity-30 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
+          >
+            ← Prev
+          </button>
+          <span className="text-sm font-medium text-zinc-600 dark:text-zinc-400 text-center">
+            {rangeLabel}
+            <span className="text-zinc-400 dark:text-zinc-500 ml-2 text-xs">
+              Week {weekIdx + 1} / {weekGroups.length}
+            </span>
+          </span>
+          <button
+            onClick={() => setWeekIdx((i) => Math.min(weekGroups.length - 1, i + 1))}
+            disabled={weekIdx === weekGroups.length - 1}
+            className="flex items-center gap-1 px-3 py-1 rounded-lg border border-zinc-300 dark:border-zinc-600 text-sm disabled:opacity-30 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
+          >
+            Next →
+          </button>
+        </div>
+      )}
+
+      {/* ── day-label header row (sticky above the scroll area) ── */}
+      <div
+        className="w-full grid gap-x-1.5"
+        style={{ gridTemplateColumns: `48px repeat(${nCols}, 1fr)` }}
+      >
+        <div /> {/* empty corner above time axis */}
+        {visibleDays.map((d) => {
+          // midnight in the user's tz for this day
+          const midnightMs = new Date(d.workWindow.start).getTime() - wStartHour * 3_600_000;
+          const dayEndMs   = midnightMs + 24 * 3_600_000;
+          const allDay = showEvents ? eventBlocks.filter((e) => {
+            if (!e.isAllDay) return false;
+            const eS = new Date(e.start).getTime();
+            const eE = new Date(e.end).getTime();
+            return eE > midnightMs && eS < dayEndMs;
+          }) : [];
+          return (
+            <div key={d.date} className="flex flex-col gap-0.5 pb-1 min-w-0">
+              <div className="text-xs text-center font-semibold text-zinc-700 dark:text-zinc-300 truncate">
+                {formatDate(d.date, tz)}
+              </div>
+              {allDay.map((e, i) => (
+                <div
+                  key={i}
+                  className="text-[10px] truncate rounded px-1 py-0.5 leading-tight"
+                  style={{
+                    backgroundColor: e.backgroundColor,
+                    color: e.foregroundColor,
+                    opacity: e.isTransparent ? 0.5 : 1,
+                  }}
+                  title={e.summary ?? "(all-day)"}
+                >
+                  {e.summary ?? "(all-day)"}
+                </div>
+              ))}
+            </div>
+          );
+        })}
+      </div>
+
+      {/* ── scrollable time grid — scrollbar on the LEFT via direction:rtl ── */}
+      <div
+        ref={scrollRef}
+        className="always-scroll overflow-y-auto rounded"
+        style={{ height: visibleH, direction: "rtl" }}
+      >
+        {/* inner grid: reset direction so content reads left-to-right */}
+        <div
+          className="grid gap-x-1.5"
+          style={{
+            direction: "ltr",
+            gridTemplateColumns: `48px repeat(${nCols}, 1fr)`,
+            height: FULL_H,
+          }}
+        >
+          {/* time axis — all 24 hours */}
+          <div className="relative select-none" style={{ height: FULL_H }}>
+            {Array.from({ length: 25 }, (_, h) => (
               <div
                 key={h}
-                className="absolute text-[10px] text-zinc-400 right-1"
-                style={{ top: `${pct * 100}%`, transform: "translateY(-50%)" }}
+                className="absolute text-[10px] text-zinc-400 right-1 leading-none"
+                style={{ top: h * HOUR_PX, transform: "translateY(-50%)" }}
               >
-                {h % 12 === 0 ? 12 : h % 12}
-                {h < 12 ? "a" : "p"}
+                {h < 24 ? formatHourLabel(h) : ""}
+              </div>
+            ))}
+          </div>
+
+          {/* day columns */}
+          {visibleDays.map((d) => {
+            const midnightMs = new Date(d.workWindow.start).getTime() - wStartHour * 3_600_000;
+            const dayEndMs   = midnightMs + 24 * 3_600_000;
+            const timedEvents = eventBlocks.filter((e) => {
+              if (e.isAllDay) return false;
+              const eS = new Date(e.start).getTime();
+              const eE = new Date(e.end).getTime();
+              return eE > midnightMs && eS < dayEndMs;
+            });
+            return (
+              <div
+                key={d.date}
+                className="relative bg-zinc-100 dark:bg-zinc-800 rounded overflow-hidden min-w-0"
+                style={{ height: FULL_H }}
+              >
+                {/* hour lines for all 24 hours */}
+                {Array.from({ length: 24 }, (_, h) => (
+                  <div
+                    key={h}
+                    className="absolute left-0 right-0 border-t border-zinc-200 dark:border-zinc-700"
+                    style={{ top: h * HOUR_PX }}
+                  />
+                ))}
+
+                {/* dim pre-work hours */}
+                {wStartHour > 0 && (
+                  <div
+                    className="absolute left-0 right-0 bg-zinc-900/10 dark:bg-zinc-950/30 pointer-events-none"
+                    style={{ top: 0, height: wStartHour * HOUR_PX }}
+                  />
+                )}
+                {/* dim post-work hours */}
+                {wEndHour < 24 && (
+                  <div
+                    className="absolute left-0 right-0 bg-zinc-900/10 dark:bg-zinc-950/30 pointer-events-none"
+                    style={{ top: wEndHour * HOUR_PX, height: (24 - wEndHour) * HOUR_PX }}
+                  />
+                )}
+
+                {/* existing events — exact colors from Google Calendar */}
+                {showEvents && timedEvents.map((e, i) => {
+                  const top    = toTopPx(e.start, midnightMs);
+                  const height = Math.max(
+                    HOUR_PX * 0.25,
+                    (new Date(e.end).getTime() - new Date(e.start).getTime()) / 3_600_000 * HOUR_PX,
+                  );
+                  return (
+                    <div
+                      key={i}
+                      className="absolute left-px right-px rounded px-1 overflow-hidden leading-tight"
+                      style={{
+                        top,
+                        height,
+                        backgroundColor: e.backgroundColor,
+                        color: e.foregroundColor,
+                        opacity: e.isTransparent ? 0.4 : 1,
+                        fontSize: "10px",
+                      }}
+                      title={`${e.summary ?? "(busy)"} · ${formatTime(e.start, tz)}–${formatTime(e.end, tz)}`}
+                    >
+                      <span className="font-semibold leading-none">{e.summary ?? "(busy)"}</span>
+                      <span className="block opacity-90">{formatTime(e.start, tz)}</span>
+                    </div>
+                  );
+                })}
+
+                {/* free slots — bright green, rendered on top */}
+                {showFreeSlots && d.freeSlots.map((s, i) => {
+                  const top    = toTopPx(s.start, midnightMs);
+                  const height = Math.max(
+                    HOUR_PX * 0.25,
+                    (new Date(s.end).getTime() - new Date(s.start).getTime()) / 3_600_000 * HOUR_PX,
+                  );
+                  return (
+                    <div
+                      key={i}
+                      className="absolute left-px right-px rounded px-1 overflow-hidden leading-tight
+                                 bg-green-400/30 dark:bg-green-400/25 border border-green-500/50"
+                      style={{ top, height, fontSize: "10px" }}
+                      title={formatSlot(s, tz)}
+                    >
+                      <span className="font-bold text-green-800 dark:text-green-300">
+                        {formatSlot(s, tz)}
+                      </span>
+                    </div>
+                  );
+                })}
               </div>
             );
           })}
         </div>
+      </div>
 
-        {days.map((d) => (
-          <div
-            key={d.date}
-            className="relative h-[480px] bg-zinc-100 dark:bg-zinc-800 rounded"
-          >
-            {hourLines.map((h) => {
-              const pct = (h * 60 - startMin) / totalMin;
-              return (
-                <div
-                  key={h}
-                  className="absolute left-0 right-0 border-t border-zinc-200 dark:border-zinc-700"
-                  style={{ top: `${pct * 100}%` }}
-                />
-              );
-            })}
-            {d.freeSlots.map((s, i) => {
-              const topPct = slotPct(s.start, d) * 100;
-              const bottomPct = slotPct(s.end, d) * 100;
-              return (
-                <div
-                  key={i}
-                  className="absolute left-0.5 right-0.5 bg-green-400/80 dark:bg-green-500/70 rounded text-[10px] text-green-950 dark:text-green-950 px-1 overflow-hidden"
-                  style={{
-                    top: `${topPct}%`,
-                    height: `${bottomPct - topPct}%`,
-                  }}
-                  title={formatSlot(s, tz)}
-                >
-                  {formatTime(s.start, tz)}
-                </div>
-              );
-            })}
-          </div>
-        ))}
+      {/* legend */}
+      <div className="flex flex-wrap gap-3 text-[11px] text-zinc-500 pt-1">
+        <span className="flex items-center gap-1">
+          <span className="inline-block w-3 h-3 rounded-sm bg-green-400/40 border border-green-500/50" />
+          Free
+        </span>
+        {[...calMap.values()]
+          .filter((c) => eventBlocks.some((e) => {
+            const cal = calMap.get(e.calendarId);
+            return cal === c && !e.isAllDay;
+          }))
+          .map((c) => (
+            <span key={c.summary} className="flex items-center gap-1">
+              <span className="inline-block w-3 h-3 rounded-sm" style={{ backgroundColor: c.bg }} />
+              {c.summary}
+            </span>
+          ))}
       </div>
     </div>
   );

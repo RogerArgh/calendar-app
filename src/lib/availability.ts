@@ -4,6 +4,8 @@ import { fromZonedTime, toZonedTime } from "date-fns-tz";
 
 export type Interval = { start: Date; end: Date };
 
+export type ColorPair = { bg: string; fg: string };
+
 export type AvailabilityInput = {
   calendarIds: string[];
   timeMin: Date;
@@ -15,12 +17,30 @@ export type AvailabilityInput = {
   minSlotMinutes: number;
   excludeTransparent: boolean;
   snapToHalfHour: boolean;
+  // Colors used to render events in the grid view.
+  // calendarColors: calendarId → { bg, fg }  (from /api/calendars)
+  // eventColorPalette: colorId → { bg, fg }   (from /api/colors, Google's palette)
+  calendarColors?: Record<string, ColorPair>;
+  eventColorPalette?: Record<string, ColorPair>;
 };
 
 export type DayAvailability = {
   date: string; // YYYY-MM-DD in the requested timezone
   workWindow: Interval;
   freeSlots: Interval[];
+};
+
+export type EventBlock = {
+  calendarId: string;
+  summary: string | null;
+  start: string; // ISO string
+  end: string;   // ISO string
+  isAllDay: boolean;
+  isTransparent: boolean;
+  // Resolved colors (calendar color, or per-event override if the user
+  // colored this event differently in Google Calendar).
+  backgroundColor: string;
+  foregroundColor: string;
 };
 
 export type AvailabilityDebug = {
@@ -247,7 +267,7 @@ function* iterDates(from: Date, to: Date, timeZone: string): Generator<string> {
 export async function computeAvailability(
   auth: OAuth2Client,
   input: AvailabilityInput,
-): Promise<{ days: DayAvailability[]; debug: AvailabilityDebug }> {
+): Promise<{ days: DayAvailability[]; debug: AvailabilityDebug; eventBlocks: EventBlock[] }> {
   const {
     calendarIds,
     timeMin,
@@ -259,7 +279,17 @@ export async function computeAvailability(
     minSlotMinutes,
     excludeTransparent,
     snapToHalfHour,
+    calendarColors = {},
+    eventColorPalette = {},
   } = input;
+
+  // Resolve the display color for an event: prefer per-event colorId override,
+  // then the calendar's color, then a neutral fallback.
+  function resolveColor(calendarId: string, colorId?: string | null): ColorPair {
+    if (colorId && eventColorPalette[colorId]) return eventColorPalette[colorId];
+    if (calendarColors[calendarId]) return calendarColors[calendarId];
+    return { bg: "#94a3b8", fg: "#ffffff" };
+  }
 
   const resultsByCal = await Promise.all(
     calendarIds.map((id) =>
@@ -273,6 +303,7 @@ export async function computeAvailability(
   );
 
   const busyIntervals: Interval[] = [];
+  const eventBlocks: EventBlock[] = [];
   const debugPerCal: AvailabilityDebug["perCalendar"] = [];
 
   for (let ci = 0; ci < calendarIds.length; ci++) {
@@ -284,18 +315,69 @@ export async function computeAvailability(
 
     if (result.kind === "events") {
       for (const e of result.events) {
-        if (excludeTransparent && e.transparency === "transparent") {
+        const isTransparent = e.transparency === "transparent";
+        const declined = userDeclined(e);
+
+        // [DIAG-MAY18] temporary logging for the May 18 morning bug
+        const startStr = e.start?.dateTime || e.start?.date || "";
+        if (startStr.startsWith("2026-05-18")) {
+          console.log("[DIAG-MAY18]", {
+            calendarId,
+            summary: e.summary,
+            start: e.start?.dateTime ?? e.start?.date,
+            end: e.end?.dateTime ?? e.end?.date,
+            transparency: e.transparency,
+            status: e.status,
+            eventType: e.eventType,
+            isTransparent,
+            declined,
+            excludeTransparent,
+            attendees: e.attendees?.map(a => ({ self: a.self, responseStatus: a.responseStatus, email: a.email })),
+          });
+        }
+
+        // --- availability computation (skip transparent/declined) ---
+        if (excludeTransparent && isTransparent) {
           skippedTransparent++;
-          continue;
-        }
-        if (userDeclined(e)) {
+        } else if (declined) {
           skippedDeclined++;
-          continue;
+        } else {
+          const i = eventToInterval(e, timeZone);
+          if (i) {
+            busyIntervals.push(i);
+            counted++;
+          }
         }
-        const i = eventToInterval(e, timeZone);
-        if (i) {
-          busyIntervals.push(i);
-          counted++;
+
+        // --- calendar display: show all events except declined ---
+        if (!declined) {
+          const color = resolveColor(calendarId, e.colorId);
+          if (e.start?.dateTime && e.end?.dateTime) {
+            eventBlocks.push({
+              calendarId,
+              summary: e.summary || null,
+              start: e.start.dateTime,
+              end: e.end.dateTime,
+              isAllDay: false,
+              isTransparent,
+              backgroundColor: color.bg,
+              foregroundColor: color.fg,
+            });
+          } else if (e.start?.date && e.end?.date) {
+            // All-day: convert to UTC using the work timezone
+            const start = fromZonedTime(`${e.start.date}T00:00:00`, timeZone);
+            const end = fromZonedTime(`${e.end.date}T00:00:00`, timeZone);
+            eventBlocks.push({
+              calendarId,
+              summary: e.summary || null,
+              start: start.toISOString(),
+              end: end.toISOString(),
+              isAllDay: true,
+              isTransparent,
+              backgroundColor: color.bg,
+              foregroundColor: color.fg,
+            });
+          }
         }
       }
       debugPerCal.push({
@@ -307,11 +389,22 @@ export async function computeAvailability(
         counted,
       });
     } else {
-      // freeBusy fallback: no transparency info, so the filter doesn't apply.
-      // Treat all returned intervals as busy.
+      // freeBusy fallback: no event detail, just intervals.
+      const fbColor = resolveColor(calendarId);
       for (const i of result.intervals) {
         busyIntervals.push(i);
         counted++;
+        // Represent each freeBusy interval as an unnamed event block.
+        eventBlocks.push({
+          calendarId,
+          summary: null,
+          start: i.start.toISOString(),
+          end: i.end.toISOString(),
+          isAllDay: false,
+          isTransparent: false,
+          backgroundColor: fbColor.bg,
+          foregroundColor: fbColor.fg,
+        });
       }
       debugPerCal.push({
         calendarId,
@@ -337,6 +430,16 @@ export async function computeAvailability(
       end: window.end > timeMax ? timeMax : window.end,
     };
     if (clippedWindow.end <= clippedWindow.start) continue;
+    if (dateKey === "2026-05-18") {
+      console.log("[DIAG-MAY18-WINDOW]", {
+        dateKey, timeZone, workStartHour, workEndHour, minSlotMinutes, snapToHalfHour,
+        clippedWindow: { start: clippedWindow.start.toISOString(), end: clippedWindow.end.toISOString() },
+        mergedOverlapping: merged
+          .filter(b => b.end > clippedWindow.start && b.start < clippedWindow.end)
+          .map(b => ({ start: b.start.toISOString(), end: b.end.toISOString() })),
+        totalMerged: merged.length,
+      });
+    }
     let freeSlots = subtract(clippedWindow, merged);
     if (snapToHalfHour) {
       freeSlots = freeSlots
@@ -354,5 +457,5 @@ export async function computeAvailability(
     totalBusyIntervals: merged.length,
   };
 
-  return { days, debug };
+  return { days, debug, eventBlocks };
 }
