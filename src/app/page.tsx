@@ -455,7 +455,7 @@ export default function Home() {
                     return (
                       <li key={c.id} style={{ direction: "ltr" }}>
                         <div
-                          className={`group flex items-center gap-2 text-sm rounded pl-3 pr-1 py-1.5 hover:bg-zinc-50 dark:hover:bg-zinc-800 ${
+                          className={`group flex items-center gap-2 text-sm rounded pl-3 pr-1 py-2 hover:bg-zinc-50 dark:hover:bg-zinc-800 ${
                             isHidden ? "opacity-50" : ""
                           }`}
                         >
@@ -464,7 +464,7 @@ export default function Home() {
                             checked={selectedIds.has(c.id)}
                             disabled={isHidden}
                             onChange={() => toggleCalendar(c.id)}
-                            className="shrink-0"
+                            className="shrink-0 w-4 h-4 cursor-pointer"
                           />
                           <span
                             className="w-3 h-3 rounded-sm shrink-0"
@@ -499,7 +499,7 @@ export default function Home() {
                             <button
                               type="button"
                               onClick={() => hideCalendar(c.id)}
-                              className="text-xs text-zinc-500 hover:text-red-600 dark:hover:text-red-400 px-1.5 py-0.5 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity"
+                              className="text-xs text-zinc-500 hover:text-red-600 dark:hover:text-red-400 px-1.5 py-0.5 shrink-0 sm:opacity-0 sm:group-hover:opacity-100 sm:transition-opacity"
                               title="Hide this calendar from the list"
                             >
                               Hide
@@ -520,7 +520,7 @@ export default function Home() {
                   value={startDate}
                   onChange={changeStartDate}
                 />
-                <DateField label="To" value={endDate} onChange={setEndDate} />
+                <DateField label="To" value={endDate} onChange={setEndDate} align="right" />
                 <label className="flex flex-col gap-1">
                   <span className="text-zinc-600 dark:text-zinc-400">
                     Day start
@@ -548,13 +548,13 @@ export default function Home() {
                 <div className="text-sm text-zinc-600 dark:text-zinc-400 mb-1">
                   Days
                 </div>
-                <div className="flex gap-1">
+                <div className="flex flex-wrap gap-1">
                   {WORKDAY_BUTTONS.map(({ label, dow }) => (
                     <button
                       key={dow}
                       type="button"
                       onClick={() => toggleWorkDay(dow)}
-                      className={`flex-1 text-xs py-1.5 rounded border transition-colors ${
+                      className={`flex-1 min-w-[2.5rem] text-xs py-2 rounded border transition-colors ${
                         workDays.has(dow)
                           ? "bg-blue-600 border-blue-600 text-white"
                           : "border-zinc-300 dark:border-zinc-700 text-zinc-600 dark:text-zinc-400"
@@ -809,10 +809,12 @@ function DateField({
   label,
   value,
   onChange,
+  align = "left",
 }: {
   label: string;
   value: string;
   onChange: (iso: string) => void;
+  align?: "left" | "right";
 }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -846,7 +848,7 @@ function DateField({
         {display}
       </button>
       {open && (
-        <div className="absolute top-full left-0 mt-1 z-20 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg shadow-lg p-2">
+        <div className={`absolute top-full mt-1 z-20 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg shadow-lg p-2 max-w-[calc(100vw-2rem)] overflow-auto ${align === "right" ? "right-0" : "left-0"}`}>
           <DayPicker
             mode="single"
             selected={isoToLocalDate(value)}
@@ -954,7 +956,7 @@ function TextView({ days, tz }: { days: DayResult[]; tz: string }) {
       </ul>
       <button
         onClick={copyToClipboard}
-        className="inline-flex items-center gap-1.5 text-xs px-3 py-1.5 rounded border border-zinc-300 dark:border-zinc-600 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
+        className="inline-flex items-center gap-1.5 text-xs px-3 py-2.5 sm:py-1.5 rounded border border-zinc-300 dark:border-zinc-600 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
       >
         {copied ? (
           <>
@@ -1091,7 +1093,7 @@ function GridView({
           <button
             onClick={() => setWeekIdx((i) => Math.max(0, i - 1))}
             disabled={weekIdx === 0}
-            className="flex items-center gap-1 px-3 py-1 rounded-lg border border-zinc-300 dark:border-zinc-600 text-sm disabled:opacity-30 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
+            className="flex items-center gap-1 px-3 py-2 rounded-lg border border-zinc-300 dark:border-zinc-600 text-sm disabled:opacity-30 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
           >
             ← Prev
           </button>
@@ -1104,14 +1106,16 @@ function GridView({
           <button
             onClick={() => setWeekIdx((i) => Math.min(weekGroups.length - 1, i + 1))}
             disabled={weekIdx === weekGroups.length - 1}
-            className="flex items-center gap-1 px-3 py-1 rounded-lg border border-zinc-300 dark:border-zinc-600 text-sm disabled:opacity-30 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
+            className="flex items-center gap-1 px-3 py-2 rounded-lg border border-zinc-300 dark:border-zinc-600 text-sm disabled:opacity-30 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
           >
             Next →
           </button>
         </div>
       )}
 
-      {/* ── day-label header row (sticky above the scroll area) ── */}
+      {/* ── day-label header row + scroll area, horizontally scrollable on mobile ── */}
+      <div className="overflow-x-auto -mx-1 px-1">
+      <div style={{ minWidth: `${48 + nCols * 72}px` }}>
       <div
         className="w-full grid gap-x-1.5"
         style={{ gridTemplateColumns: `48px repeat(${nCols}, 1fr)` }}
@@ -1171,7 +1175,7 @@ function GridView({
             {Array.from({ length: 25 }, (_, h) => (
               <div
                 key={h}
-                className="absolute text-[10px] text-zinc-400 right-1 leading-none"
+                className="absolute text-[11px] text-zinc-400 right-1 leading-none"
                 style={{ top: h * HOUR_PX, transform: "translateY(-50%)" }}
               >
                 {h < 24 ? formatHourLabel(h) : ""}
@@ -1236,7 +1240,7 @@ function GridView({
                         backgroundColor: e.backgroundColor,
                         color: e.foregroundColor,
                         opacity: e.isTransparent ? 0.4 : 1,
-                        fontSize: "10px",
+                        fontSize: "11px",
                       }}
                       title={`${e.summary ?? "(busy)"} · ${formatTime(e.start, tz)}–${formatTime(e.end, tz)}`}
                     >
@@ -1273,8 +1277,11 @@ function GridView({
         </div>
       </div>
 
+      </div>{/* minWidth wrapper */}
+      </div>{/* overflow-x-auto wrapper */}
+
       {/* legend */}
-      <div className="flex flex-wrap gap-3 text-[11px] text-zinc-500 pt-1">
+      <div className="flex flex-wrap gap-3 text-xs text-zinc-500 pt-1">
         <span className="flex items-center gap-1">
           <span className="inline-block w-3 h-3 rounded-sm bg-green-400/40 border border-green-500/50" />
           Free
