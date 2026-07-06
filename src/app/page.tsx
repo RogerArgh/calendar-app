@@ -548,13 +548,13 @@ export default function Home() {
                 <div className="text-sm text-zinc-600 dark:text-zinc-400 mb-1">
                   Days
                 </div>
-                <div className="flex flex-wrap gap-1">
+                <div className="grid grid-cols-7 gap-1">
                   {WORKDAY_BUTTONS.map(({ label, dow }) => (
                     <button
                       key={dow}
                       type="button"
                       onClick={() => toggleWorkDay(dow)}
-                      className={`flex-1 min-w-[2.5rem] text-xs py-2 rounded border transition-colors ${
+                      className={`text-xs py-2 rounded border transition-colors ${
                         workDays.has(dow)
                           ? "bg-blue-600 border-blue-600 text-white"
                           : "border-zinc-300 dark:border-zinc-700 text-zinc-600 dark:text-zinc-400"
