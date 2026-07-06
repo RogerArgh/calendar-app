@@ -663,7 +663,10 @@ export default function Home() {
             )}
 
             {results && viewMode === "text" && (
-              <TextView days={results} tz={tz} />
+              <>
+                <TextView days={results} tz={tz} />
+                <TimeConverterPanel days={results} tz={tz} />
+              </>
             )}
             {results && viewMode === "grid" && (
               <GridView
@@ -902,18 +905,30 @@ function buildClipboardText(days: DayResult[], tz: string): string {
     .join("\n");
 }
 
-function TextView({ days, tz }: { days: DayResult[]; tz: string }) {
-  const [copied, setCopied] = useState(false);
-  const withSlots = days.filter((d) => d.freeSlots.length > 0);
+const CONVERT_TIMEZONES: { label: string; tz: string }[] = [
+  { label: "ET — Eastern",          tz: "America/New_York" },
+  { label: "CT — Central",          tz: "America/Chicago" },
+  { label: "MT — Mountain",         tz: "America/Denver" },
+  { label: "PT — Pacific",          tz: "America/Los_Angeles" },
+  { label: "AKT — Alaska",          tz: "America/Anchorage" },
+  { label: "HT — Hawaii",           tz: "Pacific/Honolulu" },
+  { label: "London (GMT/BST)",       tz: "Europe/London" },
+  { label: "Paris / Berlin (CET)",   tz: "Europe/Paris" },
+  { label: "Dubai (GST)",            tz: "Asia/Dubai" },
+  { label: "Mumbai (IST)",           tz: "Asia/Kolkata" },
+  { label: "Singapore (SGT)",        tz: "Asia/Singapore" },
+  { label: "Tokyo (JST)",            tz: "Asia/Tokyo" },
+  { label: "Sydney (AEST/AEDT)",     tz: "Australia/Sydney" },
+];
 
-  async function copyToClipboard() {
-    const text = buildClipboardText(days, tz);
+function CopyButton({ getText }: { getText: () => string }) {
+  const [copied, setCopied] = useState(false);
+
+  async function handleCopy() {
+    const text = getText();
     try {
       await navigator.clipboard.writeText(text);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
     } catch {
-      // Fallback for browsers that block clipboard API without user gesture
       const el = document.createElement("textarea");
       el.value = text;
       el.style.position = "fixed";
@@ -923,10 +938,73 @@ function TextView({ days, tz }: { days: DayResult[]; tz: string }) {
       el.select();
       document.execCommand("copy");
       document.body.removeChild(el);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
     }
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
   }
+
+  return (
+    <button
+      onClick={handleCopy}
+      className="inline-flex items-center gap-1.5 text-xs px-3 py-2.5 sm:py-1.5 rounded border border-zinc-300 dark:border-zinc-600 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
+    >
+      {copied ? (
+        <>
+          <svg className="w-3.5 h-3.5 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+          </svg>
+          Copied!
+        </>
+      ) : (
+        <>
+          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+            <path strokeLinecap="round" strokeLinejoin="round" d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1" />
+          </svg>
+          Copy to clipboard
+        </>
+      )}
+    </button>
+  );
+}
+
+function SlotList({ days, tz }: { days: DayResult[]; tz: string }) {
+  const withSlots = days.filter((d) => d.freeSlots.length > 0);
+  return (
+    <ul className="space-y-2">
+      {withSlots.map((d) => (
+        <li key={d.date} className="flex flex-wrap items-center gap-x-2 gap-y-1">
+          <span className="text-sm font-medium whitespace-nowrap">
+            {formatDateHeading(d.date, tz)}:
+          </span>
+          {d.freeSlots.map((s, i) => (
+            <span
+              key={i}
+              className="text-xs bg-green-100 dark:bg-green-900/40 text-green-800 dark:text-green-300 px-2 py-1 rounded"
+            >
+              {formatSlot(s, tz)}
+            </span>
+          ))}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function tzAbbr(tz: string): string {
+  try {
+    const parts = new Intl.DateTimeFormat("en-US", {
+      timeZone: tz,
+      timeZoneName: "short",
+    }).formatToParts(new Date());
+    return parts.find((p) => p.type === "timeZoneName")?.value ?? tz;
+  } catch {
+    return tz;
+  }
+}
+
+function TextView({ days, tz }: { days: DayResult[]; tz: string }) {
+  const withSlots = days.filter((d) => d.freeSlots.length > 0);
 
   if (withSlots.length === 0) {
     return (
@@ -935,46 +1013,206 @@ function TextView({ days, tz }: { days: DayResult[]; tz: string }) {
       </p>
     );
   }
+
   return (
-    <div className="space-y-4">
-      <ul className="space-y-2">
-        {withSlots.map((d) => (
-          <li key={d.date} className="flex flex-wrap items-center gap-x-2 gap-y-1">
-            <span className="text-sm font-medium whitespace-nowrap">
-              {formatDateHeading(d.date, tz)}:
-            </span>
-            {d.freeSlots.map((s, i) => (
-              <span
-                key={i}
-                className="text-xs bg-green-100 dark:bg-green-900/40 text-green-800 dark:text-green-300 px-2 py-1 rounded"
-              >
-                {formatSlot(s, tz)}
-              </span>
-            ))}
-          </li>
-        ))}
-      </ul>
-      <button
-        onClick={copyToClipboard}
-        className="inline-flex items-center gap-1.5 text-xs px-3 py-2.5 sm:py-1.5 rounded border border-zinc-300 dark:border-zinc-600 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
-      >
-        {copied ? (
-          <>
-            <svg className="w-3.5 h-3.5 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-            </svg>
-            Copied!
-          </>
-        ) : (
-          <>
-            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
-              <path strokeLinecap="round" strokeLinejoin="round" d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1" />
-            </svg>
-            Copy to clipboard
-          </>
-        )}
-      </button>
+    <div className="space-y-2">
+      <div className="text-xs font-medium text-zinc-500 dark:text-zinc-400 uppercase tracking-wide">
+        {tzAbbr(tz)}
+      </div>
+      <SlotList days={days} tz={tz} />
+      <CopyButton getText={() => buildClipboardText(days, tz)} />
+    </div>
+  );
+}
+
+// Parse a time string like "3pm", "3:30pm", "3:00 PM", "15:00" into { hours, minutes }.
+function parseTimeStr(raw: string): { hours: number; minutes: number } | null {
+  const s = raw.trim().toLowerCase().replace(/\s+/g, "");
+  // 12-hour: 3pm, 3:30pm, 3:30 pm
+  const m12 = s.match(/^(\d{1,2})(?::(\d{2}))?(am|pm)$/);
+  if (m12) {
+    let h = parseInt(m12[1], 10);
+    const min = m12[2] ? parseInt(m12[2], 10) : 0;
+    const ampm = m12[3];
+    if (h === 12) h = ampm === "am" ? 0 : 12;
+    else if (ampm === "pm") h += 12;
+    return { hours: h, minutes: min };
+  }
+  // 24-hour: 15:00
+  const m24 = s.match(/^(\d{1,2}):(\d{2})$/);
+  if (m24) {
+    return { hours: parseInt(m24[1], 10), minutes: parseInt(m24[2], 10) };
+  }
+  return null;
+}
+
+// Convert a single time (with a reference date for DST) from sourceTz to destTz,
+// returning a formatted string like "2:00 PM".
+function convertTime(
+  refDate: string, // YYYY-MM-DD
+  hours: number,
+  minutes: number,
+  sourceTz: string,
+  destTz: string
+): string {
+  const [y, m, d] = refDate.split("-").map(Number);
+  // Build a UTC instant representing this local time in sourceTz using formatting tricks.
+  // We create an ISO string that, when parsed as UTC and formatted in sourceTz, gives hours:minutes.
+  // Use a binary-search-free approach: create a Date at nominal UTC, then measure the offset.
+  const nominalUtc = new Date(Date.UTC(y, m - 1, d, hours, minutes));
+  // Get what that UTC instant looks like in sourceTz to find the actual offset.
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: sourceTz,
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: false,
+  }).formatToParts(nominalUtc);
+  const localH = parseInt(parts.find((p) => p.type === "hour")!.value, 10);
+  const localM = parseInt(parts.find((p) => p.type === "minute")!.value, 10);
+  const offsetMin = (hours - localH) * 60 + (minutes - localM);
+  const correctedUtc = new Date(nominalUtc.getTime() + offsetMin * 60000);
+  return correctedUtc.toLocaleTimeString("en-US", {
+    timeZone: destTz,
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+  });
+}
+
+// Convert text containing times (e.g. "Mon 3pm-4pm, Tue 9:00 AM") from sourceTz to destTz.
+// Uses today's date as the DST reference.
+function convertTimesInText(text: string, sourceTz: string, destTz: string): string {
+  const today = new Date().toISOString().slice(0, 10);
+  // Match time ranges like "3pm-4pm", "9:00 AM - 10:00 AM", or bare times like "3:00 PM"
+  return text.replace(
+    /(\d{1,2}(?::\d{2})?\s*(?:am|pm))(?:\s*[-–]\s*(\d{1,2}(?::\d{2})?\s*(?:am|pm)))?/gi,
+    (match, t1, t2) => {
+      const p1 = parseTimeStr(t1);
+      if (!p1) return match;
+      const c1 = convertTime(today, p1.hours, p1.minutes, sourceTz, destTz);
+      if (t2) {
+        const p2 = parseTimeStr(t2);
+        if (!p2) return match;
+        const c2 = convertTime(today, p2.hours, p2.minutes, sourceTz, destTz);
+        return `${c1}–${c2}`;
+      }
+      return c1;
+    }
+  );
+}
+
+type ConverterMode = "convert-out" | "convert-in" | null;
+
+function TimeConverterPanel({ days, tz }: { days: DayResult[]; tz: string }) {
+  const [mode, setMode] = useState<ConverterMode>(null);
+
+  // convert-out state
+  const [outTz, setOutTz] = useState(CONVERT_TIMEZONES[0].tz);
+
+  // convert-in state
+  const [inText, setInText] = useState("");
+  const [inTz, setInTz] = useState(CONVERT_TIMEZONES[0].tz);
+  const [inResult, setInResult] = useState<string | null>(null);
+
+  const withSlots = days.filter((d) => d.freeSlots.length > 0);
+  if (withSlots.length === 0) return null;
+
+  function handleConvertIn() {
+    if (!inText.trim()) return;
+    setInResult(convertTimesInText(inText, inTz, tz));
+  }
+
+  const btnBase =
+    "text-xs px-3 py-1.5 rounded border transition-colors";
+  const btnActive =
+    btnBase + " border-blue-500 bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300";
+  const btnIdle =
+    btnBase + " border-zinc-300 dark:border-zinc-600 hover:bg-zinc-100 dark:hover:bg-zinc-800";
+
+  return (
+    <div className="mt-4 pt-4 border-t border-zinc-200 dark:border-zinc-700 space-y-3">
+      {/* Mode selector */}
+      <div className="flex flex-wrap gap-2">
+        <button
+          onClick={() => setMode(mode === "convert-out" ? null : "convert-out")}
+          className={mode === "convert-out" ? btnActive : btnIdle}
+        >
+          Convert my times to another timezone
+        </button>
+        <button
+          onClick={() => setMode(mode === "convert-in" ? null : "convert-in")}
+          className={mode === "convert-in" ? btnActive : btnIdle}
+        >
+          Enter times offered to me
+        </button>
+      </div>
+
+      {/* Convert-out panel */}
+      {mode === "convert-out" && (
+        <div className="space-y-3 p-3 rounded-lg bg-zinc-50 dark:bg-zinc-800/50 border border-zinc-200 dark:border-zinc-700">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-xs text-zinc-500 dark:text-zinc-400">Target timezone:</span>
+            <select
+              value={outTz}
+              onChange={(e) => setOutTz(e.target.value)}
+              className="text-xs rounded border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-2 py-1"
+            >
+              {CONVERT_TIMEZONES.map((opt) => (
+                <option key={opt.tz} value={opt.tz}>{opt.label}</option>
+              ))}
+            </select>
+          </div>
+          <div className="space-y-1">
+            <div className="text-xs font-medium text-zinc-500 dark:text-zinc-400 uppercase tracking-wide">
+              {tzAbbr(outTz)}
+            </div>
+            <SlotList days={days} tz={outTz} />
+          </div>
+          <CopyButton getText={() => buildClipboardText(days, outTz)} />
+        </div>
+      )}
+
+      {/* Convert-in panel */}
+      {mode === "convert-in" && (
+        <div className="space-y-3 p-3 rounded-lg bg-zinc-50 dark:bg-zinc-800/50 border border-zinc-200 dark:border-zinc-700">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-xs text-zinc-500 dark:text-zinc-400">Their timezone:</span>
+            <select
+              value={inTz}
+              onChange={(e) => { setInTz(e.target.value); setInResult(null); }}
+              className="text-xs rounded border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-2 py-1"
+            >
+              {CONVERT_TIMEZONES.map((opt) => (
+                <option key={opt.tz} value={opt.tz}>{opt.label}</option>
+              ))}
+            </select>
+          </div>
+          <textarea
+            value={inText}
+            onChange={(e) => { setInText(e.target.value); setInResult(null); }}
+            placeholder={`Paste the times offered to you here, e.g.:\nMon Jun 30: 3pm-4pm\nTue Jul 1: 9:00 AM - 10:30 AM`}
+            rows={4}
+            className="w-full text-xs rounded border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-3 py-2 font-mono resize-y"
+          />
+          <button
+            onClick={handleConvertIn}
+            className="text-xs px-3 py-1.5 rounded border border-zinc-300 dark:border-zinc-600 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
+          >
+            Convert to {tzAbbr(tz)}
+          </button>
+          {inResult !== null && (
+            <div className="space-y-2">
+              <div className="text-xs font-medium text-zinc-500 dark:text-zinc-400 uppercase tracking-wide">
+                In {tzAbbr(tz)}
+              </div>
+              <pre className="text-xs font-mono whitespace-pre-wrap bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded p-3">
+                {inResult}
+              </pre>
+              <CopyButton getText={() => inResult} />
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
